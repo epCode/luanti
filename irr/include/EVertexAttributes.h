@@ -16,6 +16,7 @@ enum E_VERTEX_ATTRIBUTES
 	EVA_BINORMAL,
 	EVA_WEIGHTS,
 	EVA_JOINT_IDS,
+	EVA_COLOR2,
 	EVA_COUNT
 };
 
@@ -31,6 +32,7 @@ const char *const sBuiltInVertexAttributeNames[] = {
 		"inVertexBinormal",
 		"inVertexWeights",
 		"inVertexJointIDs",
+		"inVertexColor2_raw", // (BGRA <-> RGBA swapped)
 		0,
 	};
 

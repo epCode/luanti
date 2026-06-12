@@ -702,6 +702,10 @@ connected_glass (Connect glass) bool false
 #    Enable smooth lighting with simple ambient occlusion.
 smooth_lighting (Smooth lighting) bool true
 
+#    Allow light sources with a light_color definition to cast colored light.
+#    Has no performance cost unless colored light sources are nearby.
+enable_colored_lights (Colored lights) bool true
+
 #    Enables tradeoffs that reduce CPU load or increase rendering performance
 #    at the expense of minor visual glitches that do not impact game playability.
 performance_tradeoffs (Tradeoffs for performance) bool false

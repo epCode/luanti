@@ -10504,6 +10504,13 @@ Used by `core.register_node`, `core.register_craftitem`, and
     -- A value outside the range 0 to core.LIGHT_MAX causes undefined
     -- behavior.
 
+    light_color = "#ffffff",
+    -- Color of the light emitted by the node.
+    -- White (the default) behaves like regular uncolored light.
+    -- Falloff and gameplay-visible light levels
+    -- are unaffected; the color is a client-side rendering effect.
+    -- Requires the client setting `enable_colored_lights` (default true).
+
     -- See "Tool Capabilities" section for an example including explanation
     tool_capabilities = {
         full_punch_interval = 1.0,

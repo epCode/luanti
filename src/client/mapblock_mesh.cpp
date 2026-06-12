@@ -324,6 +324,171 @@ void final_color_blend(video::SColor *result,
 }
 
 /*
+	Colored light chroma
+*/
+
+// Per-step multiplier of the chroma flood fill (out of 256). It roughly
+// follows the light decoding curve; 210/256 fades below the threshold after
+// ~17 steps, safely covering the 14 node range of artificial light.
+static constexpr u32 CHROMA_DECAY = 210;
+// Channel values below this stop spreading.
+static constexpr u8 CHROMA_MIN = 8;
+
+/*
+	Spreads one color channel of the light sources' chroma through the area.
+	The sources' own values must be set in both `values` and `buckets`
+	already. Dijkstra-style descending bucket queue, the same idea as the
+	engine's LightQueue, but in decoded (0..255) light space.
+*/
+static void spread_chroma_channel(const VoxelManipulator &vm,
+	const NodeDefManager *ndef, std::vector<u8> &values,
+	std::array<std::vector<v3s16>, 256> &buckets)
+{
+	static const v3s16 dirs[6] = {
+		v3s16(1, 0, 0), v3s16(-1, 0, 0),
+		v3s16(0, 1, 0), v3s16(0, -1, 0),
+		v3s16(0, 0, 1), v3s16(0, 0, -1),
+	};
+	const VoxelArea &area = vm.m_area;
+	for (int level = 255; level >= CHROMA_MIN; level--) {
+		auto &bucket = buckets[level];
+		// pushes always go to lower levels, so the vector won't grow here
+		for (const v3s16 &p : bucket) {
+			if (values[area.index(p)] != level)
+				continue; // got brighter in the meantime
+			const u8 spread = (level * CHROMA_DECAY) >> 8;
+			if (spread < CHROMA_MIN)
+				continue;
+			for (const v3s16 &dir : dirs) {
+				const v3s16 np = p + dir;
+				if (!area.contains(np))
+					continue;
+				const s32 ni = area.index(np);
+				if (values[ni] >= spread)
+					continue;
+				if (vm.m_flags[ni] & VOXELFLAG_NO_DATA)
+					continue;
+				if (!ndef->getLightingFlags(vm.m_data[ni]).light_propagates)
+					continue;
+				values[ni] = spread;
+				buckets[spread].push_back(np);
+			}
+		}
+		bucket.clear();
+	}
+}
+
+void MeshMakeData::computeLightChroma()
+{
+	m_light_chroma.clear();
+
+	if (!g_settings->getBool("enable_colored_lights"))
+		return;
+
+	const VoxelArea &area = m_vmanip.m_area;
+	if (area.hasEmptyExtent())
+		return;
+	const u32 volume = area.getVolume();
+
+	// Find the light sources. The chroma field is only worth computing if a
+	// colored source is present, but then the white sources must take part
+	// too, so that mixed areas keep a correct (white-ish) tint.
+	struct ChromaSeed {
+		v3s16 pos;
+		video::SColor color;
+		u8 brightness;
+	};
+	std::vector<ChromaSeed> seeds;
+	bool any_colored = false;
+	v3s16 p;
+	for (p.Z = area.MinEdge.Z; p.Z <= area.MaxEdge.Z; p.Z++)
+	for (p.Y = area.MinEdge.Y; p.Y <= area.MaxEdge.Y; p.Y++) {
+		u32 i = area.index(area.MinEdge.X, p.Y, p.Z);
+		for (p.X = area.MinEdge.X; p.X <= area.MaxEdge.X; p.X++, i++) {
+			if (m_vmanip.m_flags[i] & VOXELFLAG_NO_DATA)
+				continue;
+			const ContentFeatures &f = m_nodedef->get(m_vmanip.m_data[i]);
+			if (f.light_source == 0)
+				continue;
+			seeds.push_back({p, f.light_color, decode_light(f.light_source)});
+			if ((f.light_color.color | 0xff000000) != 0xffffffff)
+				any_colored = true;
+		}
+	}
+	if (!any_colored)
+		return;
+
+	m_light_chroma.assign(volume, video::SColor(0));
+
+	thread_local std::vector<u8> values;
+	thread_local std::array<std::vector<v3s16>, 256> buckets;
+
+	for (u32 ch = 0; ch < 3; ch++) {
+		const u32 shift = 16 - 8 * ch; // R, G, B of ARGB8
+		values.assign(volume, 0);
+		bool any_seed = false;
+		for (const ChromaSeed &s : seeds) {
+			const u8 v = (u8)((u32)s.brightness
+				* ((s.color.color >> shift) & 0xff) / 255U);
+			if (v < CHROMA_MIN)
+				continue;
+			const s32 i = area.index(s.pos);
+			if (v > values[i]) {
+				values[i] = v;
+				buckets[v].push_back(s.pos);
+				any_seed = true;
+			}
+		}
+		if (!any_seed)
+			continue;
+		spread_chroma_channel(m_vmanip, m_nodedef, values, buckets);
+		for (u32 i = 0; i < volume; i++) {
+			if (values[i])
+				m_light_chroma[i].color |= (u32)values[i] << shift;
+		}
+	}
+}
+
+/*
+	Returns the normalized artificial light chroma at a position
+	(in node coordinates; node centers lie on integers).
+	Trilinear over the 8 surrounding nodes; nodes without chroma data
+	(opaque or out of light range) contribute nothing. The fallback,
+	and thus the no-op value, is white.
+*/
+static video::SColor sample_light_chroma(const MeshMakeData *data, v3f node_pos)
+{
+	const VoxelArea &area = data->m_vmanip.m_area;
+	const v3f base_f(std::floor(node_pos.X), std::floor(node_pos.Y),
+		std::floor(node_pos.Z));
+	const v3f frac = node_pos - base_f;
+	const v3s16 base((s16)base_f.X, (s16)base_f.Y, (s16)base_f.Z);
+	f32 r = 0.0f, g = 0.0f, b = 0.0f;
+	for (u8 i = 0; i < 8; i++) {
+		const v3s16 d(i & 1, (i >> 1) & 1, (i >> 2) & 1);
+		const v3s16 np = base + d;
+		if (!area.contains(np))
+			continue;
+		const video::SColor c = data->m_light_chroma[area.index(np)];
+		if ((c.color & 0xffffff) == 0)
+			continue;
+		const f32 w = (d.X ? frac.X : 1.0f - frac.X)
+			* (d.Y ? frac.Y : 1.0f - frac.Y)
+			* (d.Z ? frac.Z : 1.0f - frac.Z);
+		r += w * c.getRed();
+		g += w * c.getGreen();
+		b += w * c.getBlue();
+	}
+	const f32 m = std::max({r, g, b});
+	if (m < 1.0f)
+		return video::SColor(0xffffffff);
+	// Normalize to a pure chroma; the brightness comes from the
+	// regular light data in Color.
+	return video::SColor(255, (u32)(r * 255.0f / m),
+		(u32)(g * 255.0f / m), (u32)(b * 255.0f / m));
+}
+
+/*
 	Mesh generation helpers
 */
 
@@ -667,9 +832,22 @@ MapBlockMesh::MapBlockMesh(Client *client, MeshMakeData *data):
 
 	MeshCollector collector(m_bounding_sphere_center, offset);
 
+	data->computeLightChroma();
+
 	{
 		// Generate everything
 		MapblockMeshGenerator(data, &collector).generate();
+	}
+
+	// Apply the artificial light chroma (colored lights) to the vertices.
+	// This happens centrally so that all drawtypes are covered.
+	if (!data->m_light_chroma.empty()) {
+		v3s16 mesh_origin = mesh_grid.getMeshPos(bp) * MAP_BLOCKSIZE;
+		v3f origin_f(mesh_origin.X, mesh_origin.Y, mesh_origin.Z);
+		for (auto &layerbufs : collector.prebuffers)
+		for (PreMeshBuffer &pmb : layerbufs)
+		for (video::S3DVertex &v : pmb.vertices)
+			v.Color2 = sample_light_chroma(data, v.Pos / BS + origin_f);
 	}
 
 	/*

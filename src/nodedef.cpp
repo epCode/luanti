@@ -369,6 +369,7 @@ void ContentFeatures::reset()
 	liquid_range = LIQUID_LEVEL_MAX+1;
 	drowning = 0;
 	light_source = 0;
+	light_color = video::SColor(0xffffffff);
 	damage_per_second = 0;
 	node_box.reset();
 	selection_box.reset();
@@ -515,6 +516,7 @@ void ContentFeatures::serialize(std::ostream &os, u16 protocol_version) const
 	writeU8(os, move_resistance);
 	writeU8(os, liquid_move_physics);
 	writeU8(os, post_effect_color_shaded);
+	writeARGB8(os, light_color);
 }
 
 void ContentFeatures::deSerialize(std::istream &is, u16 protocol_version)
@@ -647,6 +649,13 @@ void ContentFeatures::deSerialize(std::istream &is, u16 protocol_version)
 		// >= 5.8.0-dev
 
 		post_effect_color_shaded = readU8(is);
+
+		if (!canRead(is))
+			break;
+		// fork extension
+
+		light_color = readARGB8(is);
+		light_color.setAlpha(255);
 
 		//if (!canRead(is))
 		//	break;

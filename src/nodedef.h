@@ -358,6 +358,9 @@ struct ContentFeatures
 	bool sunlight_propagates;
 	// Amount of light the node emits
 	u8 light_source;
+	// Chroma of the emitted light (alpha is ignored).
+	// White means the light is uncolored, like all light was before.
+	video::SColor light_color;
 
 	// --- MAP GENERATION ---
 

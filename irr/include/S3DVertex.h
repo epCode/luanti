@@ -68,18 +68,22 @@ struct S3DVertex
 	//! Auxiliary value (free to use)
 	u16 Aux;
 
+	//! Secondary color, used for the chroma of incoming artificial light.
+	//! White means unchanged behavior, so loaders can ignore it.
+	SColor Color2 = SColor(0xffffffff);
+
 	constexpr bool operator==(const S3DVertex &other) const
 	{
 		return ((Pos == other.Pos) && (Normal == other.Normal) &&
 				(Color == other.Color) && (TCoords == other.TCoords) &&
-				(Aux == other.Aux));
+				(Aux == other.Aux) && (Color2 == other.Color2));
 	}
 
 	constexpr bool operator!=(const S3DVertex &other) const
 	{
 		return ((Pos != other.Pos) || (Normal != other.Normal) ||
 				(Color != other.Color) || (TCoords != other.TCoords) ||
-				(Aux != other.Aux));
+				(Aux != other.Aux) || (Color2 != other.Color2));
 	}
 
 	constexpr bool operator<(const S3DVertex &other) const
@@ -100,7 +104,11 @@ struct S3DVertex
 			return true;
 		if (TCoords != other.TCoords)
 			return false;
-		return Aux < other.Aux;
+		if (Aux < other.Aux)
+			return true;
+		if (Aux != other.Aux)
+			return false;
+		return Color2 < other.Color2;
 	}
 
 	//! Get type of the class
@@ -113,11 +121,13 @@ struct S3DVertex
 	S3DVertex getInterpolated(const S3DVertex &other, f32 d)
 	{
 		d = core::clamp(d, 0.0f, 1.0f);
-		return S3DVertex(Pos.getInterpolated(other.Pos, d),
+		S3DVertex r(Pos.getInterpolated(other.Pos, d),
 				Normal.getInterpolated(other.Normal, d),
 				Color.getInterpolated(other.Color, d),
 				TCoords.getInterpolated(other.TCoords, d),
 				d == 0.0f ? other.Aux : Aux);
+		r.Color2 = Color2.getInterpolated(other.Color2, d);
+		return r;
 	}
 };
 

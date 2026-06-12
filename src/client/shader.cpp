@@ -738,6 +738,7 @@ void ShaderSource::generateShader(ShaderInfo &shaderinfo)
 			vertex_header += "ATTRIBUTE_(8) mediump vec4 inVertexWeights;\n";
 			vertex_header += "ATTRIBUTE_(9) mediump uvec4 inVertexJointIDs;\n";
 		}
+		vertex_header += "ATTRIBUTE_(10) lowp vec4 inVertexColor2_raw;\n";
 		// GLSL 1.5 is a weird version that doesn't have `layout(location=...)`
 		// but `varying` is already deprecated and replaced by `in`/`out`.
 		if (use_glsl3 || use_glsl15) {
@@ -748,6 +749,12 @@ void ShaderSource::generateShader(ShaderInfo &shaderinfo)
 		// Our vertex color has components reversed compared to what OpenGL
 		// normally expects, so we need to take that into account.
 		vertex_header += "#define inVertexColor (inVertexColor_raw.bgra)\n";
+		vertex_header += "#define inVertexColor2 (inVertexColor2_raw.bgra)\n";
+
+		// The secondary vertex color (light chroma) is only available on
+		// the fully programmable drivers, so the define lives here.
+		if (g_settings->getBool("enable_colored_lights"))
+			shaders_header << "#define ENABLE_COLORED_LIGHTS 1\n";
 
 		fragment_header = "";
 		if (use_glsl3) {

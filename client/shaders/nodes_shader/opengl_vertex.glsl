@@ -212,8 +212,15 @@ void main(void)
 	// The pre-baked colors are halved to prevent overflow.
 	// The alpha gives the ratio of sunlight in the incoming light.
 	nightRatio = 1.0 - color.a;
+#ifdef ENABLE_COLORED_LIGHTS
+	// The secondary vertex color carries the chroma of the artificial
+	// light arriving here; sunlight stays uncolored.
+	color.rgb = color.rgb * (color.a * dayLight.rgb +
+		nightRatio * artificialLight.rgb * inVertexColor2.rgb) * 2.0;
+#else
 	color.rgb = color.rgb * (color.a * dayLight.rgb +
 		nightRatio * artificialLight.rgb) * 2.0;
+#endif
 	color.a = 1.0;
 
 	// Emphase blue a bit in darker places

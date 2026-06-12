@@ -49,9 +49,19 @@ struct MeshMakeData
 	bool m_smooth_lighting = false;
 	bool m_enable_water_reflections = false;
 
+	// Chroma "energy" of artificial light per node of m_vmanip (alpha unused).
+	// Stays empty unless colored light sources are present in the area.
+	std::vector<video::SColor> m_light_chroma;
+
 	const NodeDefManager *m_nodedef;
 
 	MeshMakeData(const NodeDefManager *ndef, u16 side_lingth, MeshGrid mesh_grid);
+
+	/*
+		Compute m_light_chroma from the light sources in the area.
+		No-op if colored lights are disabled or no colored source is near.
+	*/
+	void computeLightChroma();
 
 	/*
 		Copy block data manually (to allow optimizations by the caller)
