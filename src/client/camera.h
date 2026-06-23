@@ -20,6 +20,7 @@ class RenderingEngine;
 class WieldMeshSceneNode;
 
 enum CameraMode : int;
+enum CameraLerpFunction : int;
 
 namespace scene {
 	class ICameraSceneNode;
@@ -161,6 +162,15 @@ public:
 	// Toggle the current camera mode
 	void toggleCameraMode();
 
+	// Start a position/rotation interpolation (lerp) from the current pose toward
+	// the new target, using the given duration (seconds) and easing curve. Used
+	// for script-driven (set_camera) changes, which carry their own lerp values.
+	void notifyCameraChange(f32 duration, CameraLerpFunction lerp_function);
+
+	// Start a lerp for a player-initiated camera mode switch. This uses the
+	// independent "camera_mode_lerp" client setting, not the script's lerp value.
+	void notifyModeSwitch();
+
 	// Set the current camera mode
 	inline void setCameraMode(CameraMode mode)
 	{
@@ -208,8 +218,23 @@ private:
 	v3f m_camera_position;
 	// Absolute camera direction
 	v3f m_camera_direction;
+	// Absolute camera up vector
+	v3f m_camera_up{0.0f, 1.0f, 0.0f};
 	// Camera offset
 	v3s16 m_camera_offset;
+
+	// Position/rotation interpolation (lerp) state. When a camera change happens,
+	// the current rendered pose is captured as the lerp start and the camera eases
+	// toward the live target pose over the captured duration/curve. The duration
+	// and curve are captured per change so script changes and manual mode switches
+	// can use independent lerp settings.
+	bool m_camera_lerp_active = false;
+	f32 m_camera_lerp_progress = 0.0f;
+	f32 m_camera_lerp_duration = 0.0f;
+	CameraLerpFunction m_active_lerp_function{}; // value-inits to CAMERA_LERP_LINEAR (0)
+	v3f m_lerp_start_pos;
+	v3f m_lerp_start_dir;
+	v3f m_lerp_start_up{0.0f, 1.0f, 0.0f};
 
 	bool m_stepheight_smooth_active = false;
 
@@ -255,6 +280,8 @@ private:
 	CameraMode m_camera_mode;
 
 	f32 m_cache_view_bobbing_amount;
+	// Lerp duration (seconds) for player-initiated camera mode switches.
+	f32 m_cache_camera_mode_lerp;
 	bool m_arm_inertia;
 
 	std::vector<Nametag*> m_nametags;

@@ -122,6 +122,11 @@ camera_smoothing (Camera smoothing) float 0.0 0.0 100.0
 #    Requires: keyboard_mouse
 cinematic_camera_smoothing (Camera smoothing in cinematic mode) float 0.05 0.0 100.0
 
+#    Duration in seconds of the smooth interpolation when switching camera mode
+#    (e.g. first to third person). 0 to switch instantly. This is independent of
+#    any interpolation a game/mod sets via the set_camera() Lua API.
+camera_mode_lerp (Camera mode switch smoothing) float 0.0 0.0 10.0
+
 #    If enabled, you can place nodes at the position (feet + eye level) where you stand.
 #    This is helpful when working with nodeboxes in small areas.
 enable_build_where_you_stand (Build inside player) bool false
@@ -337,10 +342,17 @@ keymap_slot32 (Hotbar slot 32) key
 
 [*Keyboard and Mouse]
 
-#    Invert vertical mouse movement.
+#    Invert vertical mouse movement (pitch). When enabled, moving the mouse up
+#    looks down and vice versa.
 #
 #    Requires: keyboard_mouse
-invert_mouse (Invert mouse) bool false
+invert_mouse (Invert vertical look (pitch)) bool false
+
+#    Invert horizontal mouse movement (yaw). When enabled, moving the mouse left
+#    looks right and vice versa.
+#
+#    Requires: keyboard_mouse
+invert_mouse_x (Invert horizontal look (yaw)) bool false
 
 #    Mouse sensitivity multiplier.
 #

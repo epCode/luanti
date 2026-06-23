@@ -16,6 +16,16 @@ const struct EnumString es_CameraMode[] = {
 	{CAMERA_MODE_FIRST, "first"},
 	{CAMERA_MODE_THIRD, "third"},
 	{CAMERA_MODE_THIRD_FRONT, "third_front"},
+	{CAMERA_MODE_FREE, "free"},
+	{CAMERA_MODE_ATTACHED, "attached"},
+	{0, nullptr}
+};
+
+const struct EnumString es_CameraLerpFunction[] = {
+	{CAMERA_LERP_LINEAR, "linear"},
+	{CAMERA_LERP_EASE_IN, "ease_in"},
+	{CAMERA_LERP_EASE_OUT, "ease_out"},
+	{CAMERA_LERP_EASE_IN_OUT, "ease_in_out"},
 	{0, nullptr}
 };
 

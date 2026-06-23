@@ -2069,6 +2069,11 @@ void Server::SendCamera(session_t peer_id, Player *player)
 	NetworkPacket pkt(TOCLIENT_CAMERA, 1, peer_id);
 
 	pkt << static_cast<u8>(player->allowed_camera_mode);
+	pkt << player->camera_position;
+	pkt << player->camera_rotation;
+	pkt << player->camera_lerp;
+	pkt << static_cast<u8>(player->camera_lerp_function);
+	pkt << player->camera_attached_id;
 
 	Send(&pkt);
 }

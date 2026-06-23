@@ -383,6 +383,7 @@ Game::Game() :
 		"enable_fog", "mouse_sensitivity",
 		"repeat_place_time", "repeat_dig_time", "noclip", "free_move", "fog_start",
 		"cinematic", "cinematic_camera_smoothing", "camera_smoothing", "invert_mouse",
+		"invert_mouse_x",
 		"enable_hotbar_mouse_wheel", "invert_hotbar_mouse_wheel", "pause_on_lost_focus",
 	};
 	for (auto s : settings)
@@ -1992,20 +1993,22 @@ void Game::updateCameraOrientation(CameraOrientation *cam, float dtime)
 {
 	f32 sens_scale = getSensitivityScaleFactor();
 
+	// Accumulate look input (degrees) from every source first, so the look
+	// inversion settings can be applied uniformly. This keeps mouse, touch,
+	// joystick and keyboard look consistent on every platform.
+	f32 yaw_delta = 0.0f;
+	f32 pitch_delta = 0.0f;
+
 	if (g_touchcontrols) {
 		// User setting is already applied by TouchControls.
-		cam->camera_yaw   += g_touchcontrols->getYawChange()   * sens_scale;
-		cam->camera_pitch += g_touchcontrols->getPitchChange() * sens_scale;
+		yaw_delta   += g_touchcontrols->getYawChange()   * sens_scale;
+		pitch_delta += g_touchcontrols->getPitchChange() * sens_scale;
 	} else {
 		v2s32 center(driver->getScreenSize().Width / 2, driver->getScreenSize().Height / 2);
 		v2s32 dist = input->getMousePos() - center;
 
-		if (m_invert_mouse || camera->getCameraMode() == CAMERA_MODE_THIRD_FRONT) {
-			dist.Y = -dist.Y;
-		}
-
-		cam->camera_yaw   -= dist.X * m_cache_mouse_sensitivity * sens_scale;
-		cam->camera_pitch += dist.Y * m_cache_mouse_sensitivity * sens_scale;
+		yaw_delta   -= dist.X * m_cache_mouse_sensitivity * sens_scale;
+		pitch_delta += dist.Y * m_cache_mouse_sensitivity * sens_scale;
 
 		if (dist.X != 0 || dist.Y != 0)
 			input->setMousePos(center.X, center.Y);
@@ -2015,13 +2018,23 @@ void Game::updateCameraOrientation(CameraOrientation *cam, float dtime)
 	const f32 rate = dtime * sens_scale;
 
 	if (input->isKeyDown(KeyType::CAMERA_YAW_LEFT))
-		cam->camera_yaw += input->getAxisValue(KeyType::CAMERA_YAW_LEFT) * rate;
+		yaw_delta += input->getAxisValue(KeyType::CAMERA_YAW_LEFT) * rate;
 	if (input->isKeyDown(KeyType::CAMERA_YAW_RIGHT))
-		cam->camera_yaw -= input->getAxisValue(KeyType::CAMERA_YAW_RIGHT) * rate;
+		yaw_delta -= input->getAxisValue(KeyType::CAMERA_YAW_RIGHT) * rate;
 	if (input->isKeyDown(KeyType::CAMERA_PITCH_UP))
-		cam->camera_pitch -= input->getAxisValue(KeyType::CAMERA_PITCH_UP) * rate;
+		pitch_delta -= input->getAxisValue(KeyType::CAMERA_PITCH_UP) * rate;
 	if (input->isKeyDown(KeyType::CAMERA_PITCH_DOWN))
-		cam->camera_pitch += input->getAxisValue(KeyType::CAMERA_PITCH_DOWN) * rate;
+		pitch_delta += input->getAxisValue(KeyType::CAMERA_PITCH_DOWN) * rate;
+
+	// Apply the look inversion settings (and the third-person front-view quirk)
+	// to every input source consistently.
+	if (m_invert_mouse_x)
+		yaw_delta = -yaw_delta;
+	if (m_invert_mouse || camera->getCameraMode() == CAMERA_MODE_THIRD_FRONT)
+		pitch_delta = -pitch_delta;
+
+	cam->camera_yaw   += yaw_delta;
+	cam->camera_pitch += pitch_delta;
 
 	cam->camera_pitch = rangelim(cam->camera_pitch, -90, 90);
 }
@@ -2505,6 +2518,10 @@ void Game::handleClientEvent_UpdateCamera(ClientEvent *event, CameraOrientation 
 	// no parameters to update here, this just makes sure the camera is in the
 	// state it should be after something was changed.
 	updateCameraMode();
+
+	// A script-driven (set_camera) change carries its own lerp duration/curve.
+	LocalPlayer *player = client->getEnv().getLocalPlayer();
+	camera->notifyCameraChange(player->camera_lerp, player->camera_lerp_function);
 }
 
 void Game::processClientEvents(CameraOrientation *cam)
@@ -2563,6 +2580,12 @@ void Game::updateCamera(f32 dtime)
 	ClientEnvironment &env = client->getEnv();
 	LocalPlayer *player = env.getLocalPlayer();
 
+	// If an "attached" camera target was removed mid-session, revert the camera.
+	if (camera->getCameraMode() == CAMERA_MODE_ATTACHED &&
+			(player->camera_attached_id == 0 ||
+			!env.getActiveObject(player->camera_attached_id)))
+		updateCameraMode();
+
 	// For interaction purposes, get info about the held item
 	ItemStack playeritem, hand;
 	{
@@ -2591,9 +2614,25 @@ void Game::updateCameraMode()
 {
 	LocalPlayer *player = client->getEnv().getLocalPlayer();
 
+	CameraMode mode = player->allowed_camera_mode;
+
+	// An "attached" camera whose target object is missing falls back to free
+	// choice ("any"), so the player is not stuck with an unusable camera.
+	if (mode == CAMERA_MODE_ATTACHED &&
+			(player->camera_attached_id == 0 ||
+			!client->getEnv().getActiveObject(player->camera_attached_id)))
+		mode = CAMERA_MODE_ANY;
+
 	// Obey server choice
-	if (player->allowed_camera_mode != CAMERA_MODE_ANY)
-		camera->setCameraMode(player->allowed_camera_mode);
+	if (mode != CAMERA_MODE_ANY) {
+		camera->setCameraMode(mode);
+	} else if (camera->getCameraMode() == CAMERA_MODE_FREE ||
+			camera->getCameraMode() == CAMERA_MODE_ATTACHED) {
+		// We were forced into a script-only mode that is no longer valid;
+		// revert to a normal first-person camera using the mode-switch lerp.
+		camera->setCameraMode(CAMERA_MODE_FIRST);
+		camera->notifyModeSwitch();
+	}
 
 	GenericCAO *playercao = player->getCAO();
 	if (playercao) {
@@ -2694,6 +2733,12 @@ void Game::processPlayerInteraction(f32 dtime, bool show_hud)
 	case CAMERA_MODE_THIRD_FRONT:
 		shootline.start = camera->getHeadPosition();
 		// prevent player pointing anything in front-view
+		d = 0;
+		break;
+	case CAMERA_MODE_FREE:
+	case CAMERA_MODE_ATTACHED:
+		// Camera is detached from the player's view; disable pointing.
+		shootline.start = camera->getHeadPosition();
 		d = 0;
 		break;
 	}
@@ -3754,6 +3799,7 @@ void Game::readSettings()
 	m_cache_mouse_sensitivity = rangelim(m_cache_mouse_sensitivity, 0.001, 100.0);
 
 	m_invert_mouse = g_settings->getBool("invert_mouse");
+	m_invert_mouse_x = g_settings->getBool("invert_mouse_x");
 	m_enable_hotbar_mouse_wheel = g_settings->getBool("enable_hotbar_mouse_wheel");
 	m_invert_hotbar_mouse_wheel = g_settings->getBool("invert_hotbar_mouse_wheel");
 

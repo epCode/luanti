@@ -279,6 +279,7 @@ void set_default_settings()
 	settings->setDefault("cinematic", "false");
 	settings->setDefault("camera_smoothing", "0.0");
 	settings->setDefault("cinematic_camera_smoothing", "0.05");
+	settings->setDefault("camera_mode_lerp", "0.0");
 	settings->setDefault("view_bobbing_amount", "1.0");
 	settings->setDefault("enable_3d_clouds", "true");
 	settings->setDefault("soft_clouds", "false");
@@ -367,6 +368,7 @@ void set_default_settings()
 
 	// Input
 	settings->setDefault("invert_mouse", "false");
+	settings->setDefault("invert_mouse_x", "false");
 	settings->setDefault("enable_hotbar_mouse_wheel", "true");
 	settings->setDefault("invert_hotbar_mouse_wheel", "false");
 	settings->setDefault("mouse_sensitivity", "0.2");

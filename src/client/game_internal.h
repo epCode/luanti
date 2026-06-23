@@ -378,6 +378,7 @@ private:
 	f32  m_cache_cam_smoothing;
 
 	bool m_invert_mouse;
+	bool m_invert_mouse_x;
 	bool m_enable_hotbar_mouse_wheel;
 	bool m_invert_hotbar_mouse_wheel;
 

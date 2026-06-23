@@ -151,6 +151,10 @@ enum CameraMode : int {
 	CAMERA_MODE_FIRST,
 	CAMERA_MODE_THIRD,
 	CAMERA_MODE_THIRD_FRONT,
+	// Detached from the player; positioned in real-world coordinates.
+	CAMERA_MODE_FREE,
+	// Follows another object's position (rotation is script-controlled).
+	CAMERA_MODE_ATTACHED,
 
 	CameraMode_END // Dummy for validity check
 };
@@ -166,6 +170,18 @@ enum class LocalPlayerAnimation : u8
 	WD_ANIM, // walking + digging
 	COUNT
 };
+
+/// @note numeric values are part of network protocol
+enum CameraLerpFunction : int {
+	CAMERA_LERP_LINEAR = 0,
+	CAMERA_LERP_EASE_IN,
+	CAMERA_LERP_EASE_OUT,
+	CAMERA_LERP_EASE_IN_OUT,
+
+	CameraLerpFunction_END // Dummy for validity check
+};
+
+extern const struct EnumString es_CameraLerpFunction[];
 
 class Player
 {
@@ -188,6 +204,18 @@ public:
 	const std::string& getName() const { return m_name; }
 
 	CameraMode allowed_camera_mode = CAMERA_MODE_ANY;
+
+	// Camera offset/world position (real-world coordinates when mode is "free",
+	// offset from the attached object otherwise).
+	v3f camera_position;
+	// Camera rotation offset in radians (pitch, yaw, roll).
+	v3f camera_rotation;
+	// Interpolation duration (seconds) for camera position/rotation changes.
+	f32 camera_lerp = 0.0f;
+	// Easing curve used for the interpolation above.
+	CameraLerpFunction camera_lerp_function = CAMERA_LERP_LINEAR;
+	// Object id the camera follows when mode is "attached" (0 = none).
+	u16 camera_attached_id = 0;
 
 	v3f eye_offset_first;
 	v3f eye_offset_third;

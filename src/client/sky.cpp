@@ -419,7 +419,7 @@ void Sky::update(float time_of_day, float time_brightness,
 		if (m_horizon_blend() != 0) {
 			// Calculate hemisphere value from yaw, (inverted in third person front view)
 			s8 dir_factor = 1;
-			if (cam_mode > CAMERA_MODE_THIRD)
+			if (cam_mode == CAMERA_MODE_THIRD_FRONT)
 				dir_factor = -1;
 			f32 pointcolor_blend = wrapDegrees_0_360(yaw * dir_factor + 90);
 			if (pointcolor_blend > 180)

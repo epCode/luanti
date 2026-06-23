@@ -704,14 +704,73 @@ int ObjectRef::l_set_camera(lua_State *L)
 		return 0;
 
 	if (lua_isnoneornil(L, 2)) {
+		// Reset all parameters to defaults.
 		player->allowed_camera_mode = CAMERA_MODE_ANY;
+		player->camera_position = v3f(0, 0, 0);
+		player->camera_rotation = v3f(0, 0, 0);
+		player->camera_lerp = 0.0f;
+		player->camera_lerp_function = CAMERA_LERP_LINEAR;
+		player->camera_attached_id = 0;
 	} else {
 		luaL_checktype(L, 2, LUA_TTABLE);
 
-		lua_getfield(L, -1, "mode");
+		lua_getfield(L, 2, "mode");
 		if (lua_isstring(L, -1))
 			string_to_enum(es_CameraMode, player->allowed_camera_mode, lua_tostring(L, -1));
 		lua_pop(L, 1);
+
+		bool has_position = false;
+		lua_getfield(L, 2, "position");
+		if (lua_istable(L, -1)) {
+			player->camera_position = read_v3f(L, -1);
+			has_position = true;
+		}
+		lua_pop(L, 1);
+
+		bool has_rotation = false;
+		lua_getfield(L, 2, "rotation");
+		if (lua_istable(L, -1)) {
+			player->camera_rotation = read_v3f(L, -1);
+			has_rotation = true;
+		}
+		lua_pop(L, 1);
+
+		lua_getfield(L, 2, "lerp");
+		if (lua_isnumber(L, -1)) {
+			player->camera_lerp = readParam<float>(L, -1);
+			if (player->camera_lerp < 0.0f)
+				player->camera_lerp = 0.0f;
+		}
+		lua_pop(L, 1);
+
+		lua_getfield(L, 2, "lerp_function");
+		if (lua_isstring(L, -1))
+			string_to_enum(es_CameraLerpFunction, player->camera_lerp_function,
+				lua_tostring(L, -1));
+		lua_pop(L, 1);
+
+		lua_getfield(L, 2, "object");
+		if (!lua_isnil(L, -1)) {
+			ObjectRef *obj_ref = checkObject<ObjectRef>(L, -1);
+			ServerActiveObject *sao = getobject(obj_ref);
+			player->camera_attached_id = sao ? sao->getId() : 0;
+		}
+		lua_pop(L, 1);
+
+		// In "free" mode, default position/rotation to the player's current
+		// position and look direction (real-world coordinates / radians).
+		if (player->allowed_camera_mode == CAMERA_MODE_FREE) {
+			PlayerSAO *playersao = getplayersao(ref);
+			if (playersao) {
+				if (!has_position)
+					player->camera_position = playersao->getBasePosition() / BS;
+				if (!has_rotation)
+					player->camera_rotation = v3f(
+						playersao->getRadLookPitch(),
+						playersao->getRotation().Y * core::DEGTORAD,
+						0.0f);
+			}
+		}
 	}
 
 	getServer(L)->SendCamera(player->getPeerId(), player);
@@ -728,6 +787,15 @@ int ObjectRef::l_get_camera(lua_State *L)
 
 	lua_newtable(L);
 	setstringfield(L, -1, "mode", enum_to_string(es_CameraMode, player->allowed_camera_mode));
+	push_v3f(L, player->camera_position);
+	lua_setfield(L, -2, "position");
+	push_v3f(L, player->camera_rotation);
+	lua_setfield(L, -2, "rotation");
+	setfloatfield(L, -1, "lerp", player->camera_lerp);
+	setstringfield(L, -1, "lerp_function",
+		enum_to_string(es_CameraLerpFunction, player->camera_lerp_function));
+	if (player->camera_attached_id != 0)
+		setintfield(L, -1, "object", player->camera_attached_id);
 
 	return 1;
 }

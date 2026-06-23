@@ -463,6 +463,14 @@ enum ToClientCommand : u16
 	TOCLIENT_CAMERA = 0x48,
 	/*
 		u8 allowed_camera_mode
+
+		The following fields were added in 5.16.0 and are read only if present
+		(older servers omit them):
+		v3f1000 camera_position
+		v3f1000 camera_rotation
+		f1000 camera_lerp
+		u8 camera_lerp_function
+		u16 camera_attached_id
 	*/
 
 	TOCLIENT_HUDADD = 0x49,
