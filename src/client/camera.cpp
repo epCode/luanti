@@ -29,6 +29,22 @@
 
 static constexpr f32 CAMERA_OFFSET_STEP = 200;
 
+// Maps a linear interpolation factor (0..1) through the selected easing curve.
+static f32 cameraLerpEase(CameraLerpFunction fn, f32 t)
+{
+	switch (fn) {
+	case CAMERA_LERP_EASE_IN:
+		return t * t;
+	case CAMERA_LERP_EASE_OUT:
+		return 1.0f - (1.0f - t) * (1.0f - t);
+	case CAMERA_LERP_EASE_IN_OUT:
+		return easeCurve(t);
+	case CAMERA_LERP_LINEAR:
+	default:
+		return t;
+	}
+}
+
 #define WIELDMESH_OFFSET_X 55.0f
 #define WIELDMESH_OFFSET_Y -35.0f
 #define WIELDMESH_AMPLITUDE_X 7.0f
@@ -36,7 +52,7 @@ static constexpr f32 CAMERA_OFFSET_STEP = 200;
 
 static const char *setting_names[] = {
 	"view_bobbing_amount", "fov", "arm_inertia",
-	"show_nametag_backgrounds",
+	"show_nametag_backgrounds", "camera_mode_lerp",
 };
 
 Camera::Camera(MapDrawControl &draw_control, Client *client, RenderingEngine *rendering_engine):
@@ -86,6 +102,7 @@ void Camera::readSettings()
 	m_cache_fov                 = g_settings->getFloat("fov", 45.0f, 160.0f);
 	m_arm_inertia               = g_settings->getBool("arm_inertia");
 	m_show_nametag_backgrounds  = g_settings->getBool("show_nametag_backgrounds");
+	m_cache_camera_mode_lerp    = g_settings->getFloat("camera_mode_lerp", 0.0f, 10.0f);
 }
 
 Camera::~Camera()
@@ -368,13 +385,23 @@ void Camera::update(LocalPlayer* player, f32 frametime, f32 tool_reload_ratio)
 			eye_offset.Y += player->eye_offset_third_front.Y;
 			eye_offset.Z -= player->eye_offset_third_front.Z;
 			break;
+		case CAMERA_MODE_FREE:
+		case CAMERA_MODE_ATTACHED:
+			// Camera transform is computed directly from set_camera params
+			// further below; the head node is unused in these modes.
+			break;
 		}
+
+		// Unified camera position offset (supersedes set_eye_offset). It is
+		// given in node units, while the head node lives in BS-scaled space.
+		eye_offset += player->camera_position * BS;
 
 		// Set head node transformation
 		eye_offset.Y += cameratilt * -player->hurt_tilt_strength;
 		m_headnode->setPosition(eye_offset);
-		m_headnode->setRotation(v3f(pitch, 0,
-			cameratilt * player->hurt_tilt_strength));
+		v3f extra_rot = player->camera_rotation * core::RADTODEG;
+		m_headnode->setRotation(v3f(pitch + extra_rot.X, extra_rot.Y,
+			cameratilt * player->hurt_tilt_strength + extra_rot.Z));
 		m_headnode->updateAbsolutePosition();
 	}
 
@@ -402,59 +429,111 @@ void Camera::update(LocalPlayer* player, f32 frametime, f32 tool_reload_ratio)
 		rel_cam_up.rotateXYBy(-0.03 * bobdir * bobtmp * M_PI * m_cache_view_bobbing_amount);
 	}
 
-	// Compute absolute camera position and target
-	m_headnode->getAbsoluteTransformation().transformVect(m_camera_position, rel_cam_pos);
-	m_camera_direction = m_headnode->getAbsoluteTransformation()
-			.rotateAndScaleVect(rel_cam_target - rel_cam_pos);
+	// Compute the target (pre-lerp) camera transform.
+	v3f target_pos;
+	v3f target_dir;
+	v3f target_up;
 
-	v3f abs_cam_up = m_headnode->getAbsoluteTransformation()
-			.rotateAndScaleVect(rel_cam_up);
-
-	// Reposition the camera for third person view
-	if (m_camera_mode > CAMERA_MODE_FIRST)
-	{
-		v3f my_cp = m_camera_position;
-
-		if (m_camera_mode == CAMERA_MODE_THIRD_FRONT)
-			m_camera_direction *= -1;
-
-		my_cp.Y += 2;
-
-		// Calculate new position
-		bool abort = false;
-		for (int i = BS; i <= BS * 2.75; i++) {
-			my_cp.X = m_camera_position.X + m_camera_direction.X * -i;
-			my_cp.Z = m_camera_position.Z + m_camera_direction.Z * -i;
-			if (i > 12)
-				my_cp.Y = m_camera_position.Y + (m_camera_direction.Y * -i);
-
-			// Prevent camera positioned inside nodes
-			const NodeDefManager *nodemgr = m_client->ndef();
-			MapNode n = m_client->getEnv().getClientMap()
-				.getNode(floatToInt(my_cp, BS));
-
-			const ContentFeatures& features = nodemgr->get(n);
-			if (features.walkable) {
-				my_cp.X += m_camera_direction.X*-1*-BS/2;
-				my_cp.Z += m_camera_direction.Z*-1*-BS/2;
-				my_cp.Y += m_camera_direction.Y*-1*-BS/2;
-				abort = true;
-				break;
-			}
+	if (m_camera_mode == CAMERA_MODE_FREE || m_camera_mode == CAMERA_MODE_ATTACHED) {
+		// Script-controlled camera: position and rotation come from set_camera.
+		// camera_position is in node units (real-world coords when free, an
+		// offset from the attached object otherwise).
+		if (m_camera_mode == CAMERA_MODE_ATTACHED) {
+			v3f attach_pos = player_position;
+			if (auto *obj = m_client->getEnv().getActiveObject(player->camera_attached_id))
+				attach_pos = obj->getPosition();
+			target_pos = attach_pos + player->camera_position * BS;
+		} else {
+			target_pos = player->camera_position * BS;
 		}
 
-		// If node blocks camera position don't move y to height
-		if (abort && my_cp.Y > player_position.Y+BS*2)
-			my_cp.Y = player_position.Y+BS*2;
+		// Build direction/up from the rotation (radians), matching the player
+		// look-direction convention (see LocalPlayer::accelerate).
+		f32 pitch_deg = player->camera_rotation.X * core::RADTODEG;
+		f32 yaw_deg   = player->camera_rotation.Y * core::RADTODEG;
+		f32 roll_deg  = player->camera_rotation.Z * core::RADTODEG;
+		target_dir = v3f(0, 0, 1);
+		target_up  = v3f(0, 1, 0);
+		for (v3f *v : {&target_dir, &target_up}) {
+			v->rotateXYBy(roll_deg);
+			v->rotateYZBy(pitch_deg);
+			v->rotateXZBy(yaw_deg);
+		}
+	} else {
+		// Compute absolute camera position and target from the head node.
+		m_headnode->getAbsoluteTransformation().transformVect(target_pos, rel_cam_pos);
+		target_dir = m_headnode->getAbsoluteTransformation()
+				.rotateAndScaleVect(rel_cam_target - rel_cam_pos);
+		target_up = m_headnode->getAbsoluteTransformation()
+				.rotateAndScaleVect(rel_cam_up);
 
-		// update the camera position in third-person mode to render blocks behind player
-		// and correctly apply liquid post FX.
-		m_camera_position = my_cp;
+		// Reposition the camera for third person view
+		if (m_camera_mode > CAMERA_MODE_FIRST)
+		{
+			v3f my_cp = target_pos;
+
+			if (m_camera_mode == CAMERA_MODE_THIRD_FRONT)
+				target_dir *= -1;
+
+			my_cp.Y += 2;
+
+			// Calculate new position
+			bool abort = false;
+			for (int i = BS; i <= BS * 2.75; i++) {
+				my_cp.X = target_pos.X + target_dir.X * -i;
+				my_cp.Z = target_pos.Z + target_dir.Z * -i;
+				if (i > 12)
+					my_cp.Y = target_pos.Y + (target_dir.Y * -i);
+
+				// Prevent camera positioned inside nodes
+				const NodeDefManager *nodemgr = m_client->ndef();
+				MapNode n = m_client->getEnv().getClientMap()
+					.getNode(floatToInt(my_cp, BS));
+
+				const ContentFeatures& features = nodemgr->get(n);
+				if (features.walkable) {
+					my_cp.X += target_dir.X*-1*-BS/2;
+					my_cp.Z += target_dir.Z*-1*-BS/2;
+					my_cp.Y += target_dir.Y*-1*-BS/2;
+					abort = true;
+					break;
+				}
+			}
+
+			// If node blocks camera position don't move y to height
+			if (abort && my_cp.Y > player_position.Y+BS*2)
+				my_cp.Y = player_position.Y+BS*2;
+
+			// update the camera position in third-person mode to render blocks behind player
+			// and correctly apply liquid post FX.
+			target_pos = my_cp;
+		}
+	}
+
+	// Apply the client-side interpolation (lerp) toward the target pose. The
+	// start pose was captured when the camera parameters last changed.
+	if (m_camera_lerp_active && m_camera_lerp_duration > 0.0f) {
+		m_camera_lerp_progress += frametime;
+		f32 t = m_camera_lerp_progress / m_camera_lerp_duration;
+		if (t >= 1.0f) {
+			t = 1.0f;
+			m_camera_lerp_active = false;
+		}
+		f32 f = cameraLerpEase(m_active_lerp_function, t);
+		// v3f::getInterpolated(other, d) returns this*d + other*(1-d).
+		m_camera_position  = m_lerp_start_pos.getInterpolated(target_pos, 1.0f - f);
+		m_camera_direction = m_lerp_start_dir.getInterpolated(target_dir, 1.0f - f);
+		m_camera_up        = m_lerp_start_up.getInterpolated(target_up, 1.0f - f);
+	} else {
+		m_camera_lerp_active = false;
+		m_camera_position  = target_pos;
+		m_camera_direction = target_dir;
+		m_camera_up        = target_up;
 	}
 
 	// Set camera node transformation
 	m_cameranode->setPosition(m_camera_position - intToFloat(m_camera_offset, BS));
-	m_cameranode->setUpVector(abs_cam_up);
+	m_cameranode->setUpVector(m_camera_up);
 	m_cameranode->updateAbsolutePosition();
 	// *100 helps in large map coordinates
 	m_cameranode->setTarget(m_camera_position - intToFloat(m_camera_offset, BS)
@@ -652,6 +731,27 @@ void Camera::toggleCameraMode()
 		m_camera_mode = CAMERA_MODE_THIRD_FRONT;
 	else
 		m_camera_mode = CAMERA_MODE_FIRST;
+
+	// A manual mode switch uses its own, setting-controlled lerp.
+	notifyModeSwitch();
+}
+
+void Camera::notifyCameraChange(f32 duration, CameraLerpFunction lerp_function)
+{
+	// Capture the currently rendered pose as the interpolation start so the
+	// camera eases from where it is now to the new target over the lerp time.
+	m_lerp_start_pos = m_camera_position;
+	m_lerp_start_dir = m_camera_direction;
+	m_lerp_start_up = m_camera_up;
+	m_camera_lerp_progress = 0.0f;
+	m_camera_lerp_duration = duration;
+	m_active_lerp_function = lerp_function;
+	m_camera_lerp_active = true;
+}
+
+void Camera::notifyModeSwitch()
+{
+	notifyCameraChange(m_cache_camera_mode_lerp, CAMERA_LERP_EASE_IN_OUT);
 }
 
 void Camera::drawNametags()

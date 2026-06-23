@@ -9579,6 +9579,9 @@ You **must not** mix names and track numbers to refer to the same animation.
 * `get_local_animation()`: returns idle, walk, dig, walk_while_dig tables and
   `frame_speed`.
 * `set_eye_offset([firstperson, thirdperson_back, thirdperson_front])`: Sets camera offset vectors.
+    * Deprecated since 5.16.0: prefer `set_camera`'s `position` and `rotation`
+      parameters, which work in every camera mode. `set_eye_offset` keeps working
+      and its offsets are added on top of `set_camera`'s `position`.
     * `firstperson`: Offset in first person view.
       Defaults to `vector.zero()` if unspecified.
     * `thirdperson_back`: Offset in third person back view.
@@ -9592,12 +9595,38 @@ You **must not** mix names and track numbers to refer to the same animation.
     * `params` must be a table to update the parameters or `nil` (requires >= 5.16.0)
       to reset all parameters to defaults.
     * `mode`: Defines the camera mode used
-      - `any`: free choice between all modes (default)
+      - `any`: free choice between all three basic modes (default)
       - `first`: first-person camera
       - `third`: third-person camera
-      - `third_front`: third-person camera, looking opposite of movement direction
+      - `third_front`: third-person camera, looking opposite of movement direction.
+      - `free`: third-person/second-person camera unattached from the player.
+        `position` defaults to the player's current position, `rotation` defaults
+        to the player's current look direction. Requires >= 5.16.0.
+      - `attached`: attached to a specified object (position only!). If said object
+        is removed, becomes nil, or for whatever reason is no longer available, the
+        camera defaults back to `any`. Requires >= 5.16.0.
+    * `position`: Defines the camera offset from the attached object, in nodes
+      (unless `mode = "free"`, in which case it is real-world coordinates).
+      In the `first`/`third`/`third_front` modes it is an additional offset on top
+      of the default eye position. Requires >= 5.16.0.
+    * `rotation`: Defines the camera rotation offset in radians as a vector
+      `{x = pitch, y = yaw, z = roll}`. In `free`/`attached` modes it is the
+      absolute camera rotation; in the other modes it is an offset. Requires >= 5.16.0.
+    * `lerp`: A float value (seconds) that determines how long the interpolation
+      between changing the `position` and `rotation` takes. Default is `0`, i.e.
+      no interpolation. The interpolation runs entirely on the client.
+      Requires >= 5.16.0.
+    * `lerp_function`: A string naming the easing curve used for `lerp`. One of:
+      - `linear` (default)
+      - `ease_in`
+      - `ease_out`
+      - `ease_in_out`
+      Requires >= 5.16.0.
+    * `object`: An `ObjectRef` the camera follows when `mode = "attached"`.
+      Requires >= 5.16.0.
     * Supported by clients since 5.12.0.
-* `get_camera()`: Returns the camera parameters as a table as above.
+* `get_camera()`: Returns the camera parameters as a table as above (the attached
+  object is returned as its numeric id under the `object` key when set).
 * `send_mapblock(blockpos)`:
     * Sends an already loaded mapblock to the player.
     * Returns `false` if nothing was sent (note that this can also mean that

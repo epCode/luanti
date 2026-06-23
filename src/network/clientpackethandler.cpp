@@ -1610,6 +1610,28 @@ void Client::handleCommand_Camera(NetworkPacket* pkt)
 	if (player->allowed_camera_mode >= CameraMode_END)
 		player->allowed_camera_mode = CAMERA_MODE_ANY;
 
+	// Fields added in 5.16.0; older servers omit them.
+	if (pkt->hasRemainingBytes()) {
+		*pkt >> player->camera_position;
+		*pkt >> player->camera_rotation;
+		*pkt >> player->camera_lerp;
+
+		u8 lerp_function;
+		*pkt >> lerp_function;
+		player->camera_lerp_function = static_cast<CameraLerpFunction>(lerp_function);
+		if (player->camera_lerp_function >= CameraLerpFunction_END)
+			player->camera_lerp_function = CAMERA_LERP_LINEAR;
+
+		*pkt >> player->camera_attached_id;
+	} else {
+		// Reset to defaults so a re-send from an older server is consistent.
+		player->camera_position = v3f(0, 0, 0);
+		player->camera_rotation = v3f(0, 0, 0);
+		player->camera_lerp = 0.0f;
+		player->camera_lerp_function = CAMERA_LERP_LINEAR;
+		player->camera_attached_id = 0;
+	}
+
 	m_client_event_queue.push(new ClientEvent(CE_UPDATE_CAMERA));
 }
 
